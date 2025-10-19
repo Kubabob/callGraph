@@ -1,131 +1,259 @@
-## Generate static call graphs for multiple languages
-A call graph shows how functions call each other within a program.<br>
-Each oval represents a function.  Each arrow indicates a function call.<br>
-In the diagram below, the main program is represented by node MAIN.<br>
-It calls 6 functions, one of which calls 9 other functions.<br>
-<br>
-'callGraph' parses source code for function definitions and calls, generates a call graph image, and displays it on screen.<br>
-Supported languages are:<br>
-awk, bash, basic, dart, fortran, go, lua, javascript, julia, kotlin, matlab, perl, pascal, php, python, R, raku, ruby, rust, scala, swift, and tcl.<br>
-c/c++/java are not supported, since their complex and varied syntax requires heavy machinery.<br>
-<br>
-Sample output is shown below:<br>
+# callGraph.py — Static call-graph generator (Python rewrite of [callGraph](https://github.com/koknat/callGraph))
 
-!["Sample output"](callGraph.png)
+callGraph.py is a static call-graph extraction tool implemented in Python. It aims to discover function definitions and call relationships in source code using a best-effort combination of accurate parsing for Python (AST-based) and conservative regex heuristics for many other languages. The tool can emit DOT graphs, PNG/SVG/PDF images, and JSON/YAML representations of the extracted call graph.
 
-    Usage:
-        callGraph  <files>  <options>
+This README documents installation options, CLI usage, supported languages & heuristics, renderer options, debugging tips, and recommended workflows.
 
-        If the script calls helper modules, and you want the call graph to display the modules' functions,
-            list the modules explicitly on the command line:
-        callGraph script.pl path/moduleA.pm path/moduleB.pm
-        
-    Options:
-        -language <lang>           By default, filename extensions are parsed for .pl .pm .tcl .py, etc.
-                                   If those are not found, the first line of the script (#! shebang) is inspected.
-                                   If neither of those give clues, use this option to specify 'pl', 'tcl', 'py', etc
-                                   This option is required if a directory is scanned
+---
 
-        -start <function>          Specify function(s) as starting point instead of the main code.
-                                   These are displayed in green.
-                                   This is useful when parsing a large script, as the generated graph can be huge.
-                                   In addition, the calls leading to this function are charted.
-                                   Functions which are not reachable from one of the starting points
-                                     are not charted.
-                                   -start __MAIN__  can be very useful when multiple source files
-                                     are specified on the command line
-                                   The filename can be included as well:
-                                    -start <file>:<function>
+## Features
 
-        -ignore <regex>            Specify function(s) to ignore.
-                                   This is useful when pruning the output of a large graph.
-                                   In particular, use it to remove logging or other helper functions which are
-                                     called by many functions, and only clutter up the graph.
-                                   To ignore multiple functions, use this regex format:
-                                       -ignore '(abc|xyz)'
+- Accurate Python parsing using the `ast` module to avoid most false positives.
+- Heuristic (regex) parsing for many other languages (C/C++, Java, Rust, Go, TypeScript, JavaScript, PHP, Ruby, Perl, Shell, etc.).
+- Export options:
+  - DOT (.dot)
+  - Raster/vector images (.png, .svg, .pdf) via:
+    - Python `graphviz` package (if available)
+    - System `dot` (Graphviz) if installed
+    - Fallback `networkx` + `matplotlib` (pure Python)
+  - JSON/YAML call-graph dumps (`-jsnOut`, `-ymlOut`) and reading via `-jsnIn`/`-ymlIn`.
+- CLI options for selecting start nodes, ignoring functions, obfuscation, subset source export, and writing individual function sources to disk (tempdir).
+- Environment-driven debugging (`DUMP_PARSE`) to inspect intermediate parse structures.
 
-        -output <filename>         Specify an output filename
-                                   By default, the .png file is named according to the first filename.
-                                   If a filename ending in .dot is given,
-                                     only the intermediate .dot file is created.
-                                   If a filename ending in .svg is given, svg format is used
-                                   If a filename ending in .pdf is given, pdf format is used
+---
 
-        -noShow                    By default, the .png file is displayed.  This option prevents that behavior.
+## Installation
 
-        -fullPath                  By default, the script strips off the path name of the input file(s).
-                                   This option prevents that behavior.
+### Clone repository
+```
+git clone https://github.com/Kubabob/callGraph.py.git
+```
 
-        -writeSubsetCode <file>    Create an output source code file which includes only the functions
-                                     included in the graph.
-                                   This can be useful when trying to comprehend a large legacy code.
-
-        -ymlOut <file>             Create an output YAML file which describes the following for each function:
-                                       * which functions call it
-                                       * which functions it calls
-                                   This can be useful to create your own automation or custom formatting
-                                   
-        -ymlIn <file>              Parse a YAML file instead of parsing source files
-                                   The format is the same as the one created by -ymlOut
-
-        -verbose                   Provides 2 additional functionalities:
-                                   
-                                   1) Displays the external scripts referenced within each function
-
-                                   2) For Perl/TCL, attempts to list the global variables
-                                        used in each function call in the graph.
-                                      Global variables are arguably not the best design paradigm,
-                                        but they are found extensively in real-world legacy scripts.
-
-                                      Perl:
-                                          'my' variables will affect this determination (use strict).
-                                          Does not distinguish between $var, @var and %var.
-
-                                      TCL:
-                                          Variables declared as 'global' but not used, are marked with a '*'
+### 1) Using `uv` (Astral)
+```
+uv sync
+```
 
 
-    Usage examples:
-        callGraph  example.py
-        callGraph  example.pl example_helper_lib.pm
-        callGraph  <directory> -language 'go'
+### 2) Using `pip` (system-wide or active venv)
 
-    Algorithm:
-        callGraph uses a simple line-by-line algorithm, using regexes to find function definitions and calls.
-        Function definitions can be detected easily, since they start with identifiers such as:
-            'sub', 'def', 'proc', 'function', 'func', 'fun', or 'fn'
-        Function definitions end with '}' or 'end' at the same nesting level as the definition.
-        Function calls are a bit more tricky, since built-in function calls look exactly like user function calls.
-            To solve this, the algorithm first assumes that anything matching 'word(...)' is a function call,
-            and then discards any calls which do not have corresponding definitions.
-        For example, Perl:
-            sub funcA {
-                ...
-                if ($x) {
-                    print($y);
-                    funcB($y);
-                }
-                ...
-            }
-            sub funcB {
-                ...
-            }
-        Since this is not a true parser, the formatting must be consistent so that nesting can be determined.
-        If your script does not follow this rule, consider running it through a linter first.
-        Also, don't expect miracles such as parsing dynamic function calls.
-        Caveats aside, it seems to work well on garden-variety scripts spanning tens of thousands of lines,
-            and has helped me unravel large pieces of legacy code to implement urgent bug fixes.
+```
+pip install -r requirements.txt
+```
 
-        
-    Acknowledgements:
-        This code borrows core functionality from https://github.com/cobber/perl_call_graph
+### 3) Using `pipenv`
 
-    Requirements:
-        GraphViz and the Perl GraphViz library must be installed:
-            sudo apt install graphviz
-            sudo apt install make
-            sudo cpanm install GraphViz
-        On Mac:
-            brew install graphviz
-            brew install cpanminus
-            sudo cpanm GraphViz
+```
+pipenv install -r requirements.txt
+```
+
+### 4) Using built-in `venv`
+
+```
+# create and activate a virtualenv (POSIX)
+python3 -m venv .venv
+source .venv/bin/activate
+
+pip install -r requirements.txt
+```
+
+On Windows:
+
+```
+python -m venv .venv
+.\\.venv\\Scripts\\activate
+
+pip install -r requirements.txt
+```
+---
+
+## Quick usage
+
+Run the script directly:
+
+```
+# parse a single Python file, generate graph and JSON
+python callGraph.py test/example.py -language py -output example.png -jsnOut callGraph_py.json
+
+# parse a single Rust file
+python callGraph.py test/example.rs -language rs -output example.svg -jsnOut callGraph_rs.json
+```
+
+Common flags:
+
+- `-language <lang>` — force language (`py`, `js`, `ts`, `rs`, `c`, `cpp`, `java`, ...). Required when scanning directories.
+- `-start <regex>` — start graph traversal from function(s) matching this regex.
+- `-ignore <regex>` — ignore function names matching this regex.
+- `-output <file>` — output filename. If extension is:
+  - `.dot` — emits only the DOT file.
+  - `.png`, `.svg`, `.pdf` — attempts to render image (with fallback chain).
+  - If omitted, a temporary directory will be created for output.
+- `-noShow` — do not attempt to display the rendered image.
+- `-fullPath` — do not strip file path from node labels (show full path).
+- `-writeFunctions` — write each discovered function body into separate files in a temp directory.
+- `-writeSubsetCode <file>` — write a source file containing only the functions included in the final graph (preserves shebang if present).
+- `-jsnOut <file>` — write JSON representation of the call graph to file.
+- `-jsnIn <file>` — read JSON representation of call graph from file (skip parsing).
+- `-ymlOut <file>` / `-ymlIn <file>` — same as JSON but YAML (requires PyYAML).
+- `-verbose` — verbose output (includes best-effort variable/script analysis).
+- `-obfuscate` — obfuscate function names in the emitted graph.
+- `--renderer` — choose renderer: `auto` (default), `python-graphviz`, `system-dot`, `networkx`.
+
+Examples:
+
+```
+# generate dot only:
+python callGraph.py test/example.py -language py -output example.dot
+
+# generate svg with preferred renderer:
+python callGraph.py test/example.cpp -language cpp -output example.svg --renderer system-dot
+
+# read a precomputed call-graph json and render it:
+python callGraph.py -jsnIn callGraph.json -output callGraph.png
+```
+
+---
+
+## Supported languages (heuristic list)
+
+The parser contains heuristic regex patterns for many languages. The following languages/extensions are recognized or have dedicated heuristics:
+
+- Python: `py` (AST parsing — highest accuracy)
+- JavaScript: `js`, `jsx`
+- TypeScript: `ts`, `tsx`
+- C / C++: `c`, `cpp` (basic heuristics — may miss signatures or templates)
+- Java: `java`
+- Rust: `rs`
+- Go: `go`
+- Swift: `swift`
+- PHP: `php`
+- Ruby: `rb`
+- Perl: `pl`
+- Shell scripts: `sh`, `bash`, `zsh`
+- Lua: `lua`
+- Kotlin: `kt`
+- Dart: `dart`
+- Julia: `jl`
+- R: `r`
+- Objective-C-ish: `m` (best-effort)
+- Scala / Scalding scripts: `sc`
+- Pascal: `pas`
+- Verilog-like: `v`
+
+Notes:
+- The regex-based heuristics are intentionally conservative and meant as fallbacks. For best results with non-Python languages, consider using language-specific AST tools or instrumented analysis.
+- When scanning directories you must specify `-language` to limit file selection (the tool currently requires that to avoid scanning many unrelated files).
+
+---
+
+## Renderer behavior and fallbacks
+
+callGraph.py selects a renderer using a preference chain — either `auto` or the `--renderer` you specify:
+
+1. `python-graphviz` package (`graphviz` Python package):
+   - Good integration but often still requires the Graphviz `dot` executable on your system.
+2. `system-dot` (`dot` command from Graphviz):
+   - Preferred for high-quality layout. If you want to use `--renderer system-dot` ensure Graphviz is installed and `dot` is on `PATH`.
+3. `networkx` + `matplotlib`:
+   - Pure Python fallback; draws a reasonable graph and exports PNG/SVG/PDF. Install with `pip install networkx matplotlib`.
+
+If none of the renderers succeed, the DOT file will still be generated and reported to you so it can be rendered later.
+
+---
+
+## Debugging and troubleshooting
+
+- If the tool prints `ERROR: No call graph data to process`:
+  - Ensure `-language` is set appropriately (especially when passing directories).
+  - Inspect JSON intermediate output with `-jsnOut` to see what the call-graph construction received.
+  - Run with `DUMP_PARSE=1` environment variable set to dump parsing internals (function definitions, contents, and raw call counts). Example:
+
+```
+# Dump parse internals to stdout (POSIX)
+DUMP_PARSE=1 python callGraph.py test/example.py -language py
+
+# Or write JSON and inspect it
+python callGraph.py test/example.py -language py -jsnOut /tmp/out.json
+cat /tmp/out.json | jq .
+```
+
+- When a language is mis-parsed:
+  - The heuristics may not cover your language idioms (macros, generics, complex signatures). Consider adding a targeted regex in `LANG_SYNTAX` or (preferably) use a proper AST-based parser for that language.
+  - For Python, the AST-based parsing is accurate for detecting `def` and `async def`. Module-level code is treated as `__MAIN__`.
+
+- Rendering failures:
+  - If `--renderer system-dot` fails, verify the `dot` binary is available (`which dot`) and that calling `dot -V` works.
+  - If the Python `graphviz` package raises an exception, check whether `dot` is present and accessible; the Python package often requires the system `dot` to actually render.
+  - The `networkx` fallback requires `networkx` and `matplotlib`.
+
+- If you see many spurious edges:
+  - This is most likely caused by the conservative rescans (content- and range-based heuristics) used for non-Python languages. You can inspect `parse.func_call`, `parse.func_definition`, and `parse.func_contents` via `DUMP_PARSE=1` to understand which calls were discovered and why edges exist.
+  - Consider filtering with `-ignore <regex>` to drop common helper or library functions that pollute the graph.
+
+---
+
+## Internal data and debugging outputs
+
+- The parser builds a `ParseResult` structure with:
+  - `shebang` — optional shebang line.
+  - `func_contents` — map: function name -> file path -> function body text (as parsed).
+  - `func_definition` — map: function name -> file path -> first line number.
+  - `func_call` — nested map: caller function name -> file path -> called identifier -> count.
+
+- You can emit the final call-graph JSON with `-jsnOut`, or read a precomputed one with `-jsnIn`.
+
+- `DUMP_PARSE=1` prints the normalized `ParseResult` object to stdout (useful for debugging regex heuristics and AST fallbacks).
+
+---
+
+## Extending language support
+
+- Regex rules are maintained in the `LANG_SYNTAX` mapping in `callGraph.py`:
+  - Keys: `functionDefinition`, `functionEnd`, `functionCall`, `comment`, `variable`.
+  - Each maps language identifiers to a regex string.
+- Adding support/improved heuristics:
+  - Edit `LANG_SYNTAX` to add or tune regexes.
+  - For better precision (especially for JS/TS/TSX/JSX), consider integrating an AST-based parser (e.g., `tree-sitter`, `esprima`, or language-specific compilers) and replacing the regex heuristics for that language.
+
+---
+
+## Examples
+
+1) Generate graph and JSON for a Python example:
+
+```
+python callGraph.py test/example.py -language py -output example.png -jsnOut python_callGraph.json
+```
+
+2) Scan a directory of Rust files (force language):
+
+```
+python callGraph.py test -language rs -output rust_graph.svg -jsnOut rust_callGraph.json
+# Mandatory: -language when scanning directories
+```
+
+3) Read a previously generated JSON and render:
+
+```
+python callGraph.py -jsnIn rust_callGraph.json -output rust_graph.png
+```
+
+---
+
+## Limitations & notes
+
+- Regex-based parsing is heuristic and not a substitute for proper AST parsing. You will see varying accuracy depending on language complexity.
+- For large codebases or languages with heavy macro/generic usage, the conservative rescanning may produce false positives or degrade quality. Use targeted filters (`-ignore`) or consider integrating a language-accurate parser.
+- Directory scans require `-language` to avoid unintended matches.
+- Rendering quality depends on the chosen renderer and availability of system tools (`dot`) and Python packages.
+
+---
+
+## Contributing and testing
+
+- To extend `LANG_SYNTAX`, edit `callGraph.py` and add/adjust regexes for the language key.
+- Add regression tests by placing example files in `test/` and asserting parsing outputs or dot contents.
+- If you want, I can:
+  - Add a `--list-parsed` CLI flag that prints the parsed functions per file.
+  - Add `--no-rescan` to disable conservative rescans for non-Python languages.
+  - Add a `--list-renderers` flag that reports which renderers are available on the host.

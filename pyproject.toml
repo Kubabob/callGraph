@@ -1,0 +1,12 @@
+[project]
+name = "callgraph"
+version = "0.1.0"
+description = "This is rewrite of callGraph in Python"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "graphviz>=0.21",
+    "matplotlib>=3.10.7",
+    "networkx>=3.5",
+    "pyyaml>=6.0.3",
+]
