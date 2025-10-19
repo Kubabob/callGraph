@@ -1,12 +1,15 @@
-#!/home/utils/node-v14.5.0/bin/node
-// #!/usr/bin/env node
-// Same example for .ts typescript
+#!/usr/bin/env node
+// Same example for .ts (TypeScript)
 
-function foo() {
-    arg1 = "a";
+let globalRunCount: number = 0;
+let globalList: string[] = [];
+
+function foo(): void {
+    const arg1: string = "a";
     bar(globalList);
 }
-function bar(myList) {
+
+function bar(myList: string[]): void {
     globalRunCount = globalRunCount + 1;
     if (globalRunCount < 2) {
         bar(myList);
@@ -15,9 +18,11 @@ function bar(myList) {
     console.log("hello");
     baz();
 }
-function baz() {
+
+function baz(): void {
     console.log("world %s", globalList);
 }
+
 // main program
 globalRunCount = 0;
 globalList = ["a", "b"];

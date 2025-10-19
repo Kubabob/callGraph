@@ -1,0 +1,34 @@
+{
+  "test/example.py:foo": {
+    "calls": {
+      "test/example.py:bar": 1
+    },
+    "called_by": {
+      "test/example.py:__MAIN__": 1
+    }
+  },
+  "test/example.py:bar": {
+    "calls": {
+      "test/example.py:bar": 1,
+      "test/example.py:baz": 1
+    },
+    "called_by": {
+      "test/example.py:foo": 1,
+      "test/example.py:bar": 1
+    }
+  },
+  "test/example.py:baz": {
+    "calls": {},
+    "called_by": {
+      "test/example.py:bar": 1,
+      "test/example.py:__MAIN__": 1
+    }
+  },
+  "test/example.py:__MAIN__": {
+    "calls": {
+      "test/example.py:foo": 1,
+      "test/example.py:baz": 1
+    },
+    "called_by": {}
+  }
+}

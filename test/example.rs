@@ -2,7 +2,7 @@ fn foo() {
     let arg1 = "a";
     bar(arg1);
 }
-fn bar( myList: String ) {
+fn bar(myList: String) {
     if (0) {
         bar(myList);
     }
@@ -14,7 +14,7 @@ pub fn baz() {
 }
 
 // main program
-fun main(args: Array<String>) {
+fn main(args: Array<String>) {
     foo();
     baz();
 }

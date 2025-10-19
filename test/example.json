@@ -1,0 +1,39 @@
+{
+  "test/example.rs:foo": {
+    "calls": {
+      "test/example.rs:bar": 1
+    },
+    "called_by": {
+      "test/example.rs:main": 1
+    }
+  },
+  "test/example.rs:bar": {
+    "calls": {
+      "test/example.rs:bar": 1
+    },
+    "called_by": {
+      "test/example.rs:foo": 1,
+      "test/example.rs:bar": 1
+    }
+  },
+  "test/example.rs:__MAIN__": {
+    "calls": {
+      "test/example.rs:baz": 1
+    },
+    "called_by": {}
+  },
+  "test/example.rs:baz": {
+    "calls": {},
+    "called_by": {
+      "test/example.rs:__MAIN__": 1,
+      "test/example.rs:main": 1
+    }
+  },
+  "test/example.rs:main": {
+    "calls": {
+      "test/example.rs:foo": 1,
+      "test/example.rs:baz": 1
+    },
+    "called_by": {}
+  }
+}

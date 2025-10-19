@@ -1,0 +1,12 @@
+digraph call_graph {
+	concentrate=true fontsize=24 rankdir=LR ratio=0.7
+	test_example_rs_bar [label="example.rs\nbar"]
+	test_example_rs_baz [label="example.rs\nbaz"]
+	test_example_rs_foo [label="example.rs\nfoo"]
+	test_example_rs_main [label="example.rs\nmain" color="/greens3/3" fillcolor="/greens3/2" style=filled]
+	test_example_rs_bar -> test_example_rs_bar
+	test_example_rs_bar -> test_example_rs_baz
+	test_example_rs_foo -> test_example_rs_bar
+	test_example_rs_main -> test_example_rs_baz
+	test_example_rs_main -> test_example_rs_foo
+}
