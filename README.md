@@ -1,4 +1,4 @@
-# callGraph.py — Static call-graph generator (Python rewrite of [callGraph](https://github.com/koknat/callGraph))
+# callGraph.py — Static call-graph generator (Python rewrite of [callGraph](https://github.com/koknat/callGraph) with some changes)
 
 callGraph.py is a static call-graph extraction tool implemented in Python. It aims to discover function definitions and call relationships in source code using a best-effort combination of accurate parsing for Python (AST-based) and conservative regex heuristics for many other languages. The tool can emit DOT graphs, PNG/SVG/PDF images, and JSON/YAML representations of the extracted call graph.
 
