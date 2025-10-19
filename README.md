@@ -4,8 +4,6 @@ callGraph.py is a static call-graph extraction tool implemented in Python. It ai
 
 ![callGraph.py architecture presented with callGraph.py](callGraph.png)
 
-This README documents installation options, CLI usage, supported languages & heuristics, renderer options, debugging tips, and recommended workflows.
-
 ---
 
 ## Features
