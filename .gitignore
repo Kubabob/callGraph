@@ -1,3 +1,5 @@
 callGraph
 *.png
 *.dot
+
+__pycache__

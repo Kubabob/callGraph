@@ -327,6 +327,8 @@ class TreesitterParser:
         main_key = "__MAIN__"
         func_contents: Dict[str, Dict[str, str]] = defaultdict(dict)
         func_definition: Dict[str, Dict[str, int]] = defaultdict(dict)
+        # New: metadata captured per function -> file -> metadata dict
+        func_meta: Dict[str, Dict[str, Dict[str, object]]] = defaultdict(dict)
         func_call_nested = defaultdict(
             lambda: defaultdict(lambda: defaultdict(int))
         )
@@ -358,10 +360,11 @@ class TreesitterParser:
             root = tree.root_node
 
             # Collect function nodes: nodes of type 'function_definition'
-            # We'll gather a list of tuples: (name, node, start_byte, end_byte, lineno)
-            functions_meta: List[Tuple[str, object, int, int, int]] = []
+            # We'll gather a list of tuples: (name, node, start_byte, end_byte, lineno, meta)
+            # Where meta is a dict with keys: params (int), loc (int), complexity (int), parent (Optional[str])
+            functions_meta: List[Tuple[str, object, int, int, int, dict]] = []
 
-            # traverse tree to collect function_definition nodes
+            # traverse tree to collect function_definition nodes and compute metadata
             to_visit = [root]
             while to_visit:
                 node = to_visit.pop()
@@ -380,11 +383,135 @@ class TreesitterParser:
                     else:
                         # Fallback synthetic name with start row
                         name = f"<anon_fn_{node.start_point[0] + 1}>"
+
                     start_byte = node.start_byte
                     end_byte = node.end_byte
                     lineno = node.start_point[0] + 1
+                    # Compute lines of code (LOC) for the function (1-based lines)
+                    try:
+                        start_line = node.start_point[0] + 1
+                        end_line = node.end_point[0] + 1
+                        loc = max(0, end_line - start_line + 1)
+                    except Exception:
+                        loc = 0
+
+                    # Compute parameter count: look for parameter list / parameter nodes
+                    params = 0
+                    try:
+                        # try common child field names for C-family grammars
+                        for child in node.children:
+                            ctype = getattr(child, "type", "")
+                            if (
+                                "parameter" in ctype
+                                or "parameter_list" in ctype
+                                or "parameters" in ctype
+                            ):
+                                # count identifiers within the parameter subtree
+                                queue_p = [child]
+                                while queue_p:
+                                    pn = queue_p.pop()
+                                    try:
+                                        if (
+                                            "identifier"
+                                            in getattr(pn, "type", "").lower()
+                                        ):
+                                            params += 1
+                                    except Exception:
+                                        pass
+                                    try:
+                                        queue_p.extend(list(pn.children))
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        params = 0
+
+                    # Rough cyclomatic complexity estimate: count control-flow nodes in subtree
+                    complexity = 1
+                    try:
+                        control_kinds = {
+                            "if_statement",
+                            "for_statement",
+                            "while_statement",
+                            "do_statement",
+                            "switch_statement",
+                            "case_statement",
+                            "conditional_expression",
+                            "binary_expression",  # may count logical ops later
+                        }
+                        # Also count logical && and || in text as heuristic
+                        cnt = 0
+                        queue_c = [node]
+                        while queue_c:
+                            cn = queue_c.pop()
+                            try:
+                                ctype = getattr(cn, "type", "") or ""
+                                if ctype in control_kinds or any(
+                                    k in ctype
+                                    for k in (
+                                        "if",
+                                        "for",
+                                        "while",
+                                        "switch",
+                                        "case",
+                                        "conditional",
+                                    )
+                                ):
+                                    cnt += 1
+                            except Exception:
+                                pass
+                            try:
+                                queue_c.extend(list(cn.children))
+                            except Exception:
+                                pass
+                        # additional text heuristics for boolean ops
+                        try:
+                            snippet = src_bytes[start_byte:end_byte].decode(
+                                "utf-8", errors="ignore"
+                            )
+                            cnt += snippet.count("&&") + snippet.count("||")
+                        except Exception:
+                            pass
+                        complexity = max(1, cnt + 1)
+                    except Exception:
+                        complexity = 1
+
+                    # Determine enclosing parent (class/struct/namespace) if present
+                    parent_name = None
+                    try:
+                        anc = node.parent
+                        while anc is not None and anc != root:
+                            atype = getattr(anc, "type", "") or ""
+                            if (
+                                "class" in atype
+                                or "struct" in atype
+                                or "namespace" in atype
+                            ):
+                                # find an identifier in the ancestor
+                                ident = self._find_first_identifier(anc)
+                                if ident:
+                                    sb, eb = ident
+                                    try:
+                                        parent_name = src_bytes[sb:eb].decode(
+                                            "utf-8", errors="ignore"
+                                        )
+                                    except Exception:
+                                        parent_name = atype
+                                else:
+                                    parent_name = atype
+                                break
+                            anc = anc.parent
+                    except Exception:
+                        parent_name = None
+
+                    meta = {
+                        "params": params,
+                        "loc": loc,
+                        "complexity": complexity,
+                        "parent": parent_name,
+                    }
+
                     functions_meta.append(
-                        (name, node, start_byte, end_byte, lineno)
+                        (name, node, start_byte, end_byte, lineno, meta)
                     )
                 # We'll still recurse into children
                 try:
@@ -397,7 +524,7 @@ class TreesitterParser:
 
             # Build mappings for quick containment checks
             # For each function we will extract source slice and record definition info.
-            for name, node, sbyte, ebyte, lineno in functions_meta:
+            for name, node, sbyte, ebyte, lineno, meta in functions_meta:
                 try:
                     contents = src_bytes[sbyte:ebyte].decode(
                         "utf-8", errors="ignore"
@@ -406,6 +533,16 @@ class TreesitterParser:
                     contents = ""
                 func_contents[name][fpath] = contents
                 func_definition[name][fpath] = lineno
+                # record metadata per function per file
+                try:
+                    func_meta[name][fpath] = dict(meta)
+                except Exception:
+                    func_meta[name][fpath] = {
+                        "params": 0,
+                        "loc": 0,
+                        "complexity": 1,
+                        "parent": None,
+                    }
 
             # At this point, any call expression will be attributed to the function
             # whose byte-range contains the call start. If no function contains it,
@@ -428,7 +565,7 @@ class TreesitterParser:
 
             # Helper: find containing function name for a byte offset
             def find_enclosing_function_name(offset: int) -> str:
-                for name, _, sbyte, ebyte, _ in functions_meta:
+                for name, _, sbyte, ebyte, _, _ in functions_meta:
                     if sbyte <= offset < ebyte:
                         return name
                 return main_key
@@ -480,28 +617,48 @@ class TreesitterParser:
                 func_call_out[caller][fpath] = dict(calls)
 
         # Build and return the ParseResult dataclass from the parsing module if available.
+        # Attach `func_meta` as an extra attribute on the returned object so the rest
+        # of the tool can optionally consume treesitter-derived metadata.
+        func_meta_out: Dict[str, Dict[str, Dict[str, object]]] = {
+            fn: dict(fmap) for fn, fmap in func_meta.items()
+        }
+
         if parsing is not None and hasattr(parsing, "ParseResult"):
-            return parsing.ParseResult(
+            r = parsing.ParseResult(
                 shebang=shebang,
                 func_contents=func_contents_out,
                 func_definition=func_definition_out,
                 func_call=func_call_out,
             )
+            # attach metadata
+            try:
+                setattr(r, "func_meta", func_meta_out)
+            except Exception:
+                # best-effort: ignore if attribute can't be set
+                pass
+            return r
 
         # Fallback: create a minimal compatible object when parsing.ParseResult is unavailable.
         # This ensures callers (the rest of the tool) can rely on the same attribute names.
         class _LocalParseResult:
             def __init__(
-                self, shebang, func_contents, func_definition, func_call
+                self,
+                shebang,
+                func_contents,
+                func_definition,
+                func_call,
+                func_meta,
             ):
                 self.shebang = shebang
                 self.func_contents = func_contents
                 self.func_definition = func_definition
                 self.func_call = func_call
+                self.func_meta = func_meta
 
         return _LocalParseResult(
             shebang=shebang,
             func_contents=func_contents_out,
             func_definition=func_definition_out,
             func_call=func_call_out,
+            func_meta=func_meta_out,
         )
