@@ -214,11 +214,17 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         syntax = parsing.define_syntax(language)
 
-        # Conservative parser selection: use treesitter only when explicitly requested.
+        # Conservative parser selection:
+        # - Use treesitter when explicitly requested by the user.
+        # - When `--parser auto` prefer treesitter for C/C++ files (cpp/c).
+        use_treesitter = False
         if args.parser == "treesitter":
+            use_treesitter = True
+        elif args.parser == "auto" and language in ("cpp", "c"):
+            use_treesitter = True
+
+        if use_treesitter:
             try:
-                # Optional treesitter wrapper is expected to live under the project.
-                # If it is not present we fall back to the regex/AST parser.
                 from treesitter_wrapper import TreesitterParser  # type: ignore
 
                 ts_parser = TreesitterParser(
@@ -232,7 +238,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                 )
                 parse = parsing.parse_files(files, language, syntax)
         else:
-            # Default behavior: regex-based parser (Python uses AST internally).
             parse = parsing.parse_files(files, language, syntax)
 
         if os.environ.get("DUMP_PARSE"):
